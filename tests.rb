@@ -1,7 +1,7 @@
 #!/bin/env ruby
 
-puts "Test 1 - Load DNS"
-require_relative 'tdns'
+puts "Test 1 - Load DNS module"
+require_relative 'dns'
 puts "\x1B[1FTest 1 - Load DNS - Success"
 
 puts "Test 2 - Create DNS::Record"
@@ -16,8 +16,8 @@ puts "\x1B[1FTest 2 - Create DNS::Record - Success"
 puts r
 
 puts "Test 3 - Encode/Decode"
-
-
+encoded = r.encode
+decoded = DNS::Record.decode(encoded)
 puts "\x1B[1FTest 3 - Encode/Decode - Success"
 puts encoded
 puts decoded

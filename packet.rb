@@ -1,3 +1,5 @@
+require_relative 'decoders'
+
 ##
 # Set of tools for encoding/decoding data in binary packets
 class Packet
@@ -32,6 +34,9 @@ class Packet
   # isn't required to be an array, only needs to implement 'include?'
   HIDDEN = []
   def HIDDEN = self.class::HIDDEN
+
+  FLAGS = {}
+  def FLAGS = self.class::FLAGS
   
   def initialize(fields = {})
     @fields = {}
@@ -39,14 +44,23 @@ class Packet
       @fields[k] = from_const(k, fields[k])
     end
   end
-
+  
   def encode()
     return self._encode(self.HEADER, @fields)
   end
+  
+  ##
+  # Decode a binary string into a packet, decode_head will never return
+  # trailing un-decoded data, even if it is present
+  def self.decode_with_offset(data, offset = 0)
+    fields, off = Decode::by_pattern(data, self::HEADER, offset: offset)
+    pk = self.new(fields)
 
-  def self.decode(data)
-    fields, _ = self._decode(self::HEADER, data)
-    return self.new(fields)
+    return pk, offset
+  end
+
+  def self.decode(packet)
+    return decode_with_offset(packet).first
   end
 
   ##
@@ -94,8 +108,9 @@ class Packet
       end
 
       return self.method(name).(*args)
+    #elsif self.FLAGS.include? base
+    # PLANNED 
     end
-
 
     return super(name, *args)
   end
@@ -109,7 +124,6 @@ class Packet
   end
   
   private
-
   def _encode(pattern, params)
     Hash(pattern)
     Hash(params)
@@ -120,23 +134,11 @@ class Packet
 
     return fields.pack(encoding)
   end
-    
-  def self._decode(pattern, data)
-    Hash(pattern)
-    String(data)
-
-    parsed = {}
-    
-    tail = data
-    for field, bin in pattern
-      out, *extra, tail = tail.unpack("#{pattern[field]}a*")
-      parsed[field] = extra.empty? ? out : [out] + extra
-    end
-    
-    # return remaining characters if they exist, otherwise just the parsed result
-    return tail.length != 0 ? [parsed, tail] : parsed
-  end
-  private_class_method :decode
+  
+  # here for convenience, more advanced decoding
+  # should import this module directly
+  def self._decode(data, pattern, offset:0) = Decode.by_pattern(data, pattern, offset: offset)
+  private_class_method :_decode
   
   def self.from_const(field, const)
     return self::CONST.dig(field, const) || const 
