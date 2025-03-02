@@ -32,7 +32,7 @@ class Packet
   # given custom accessors
   #
   # isn't required to be an array, only needs to implement 'include?'
-  HIDDEN = []
+  HIDDEN = [ :_flags ]
   def HIDDEN = self.class::HIDDEN
 
   FLAGS = {}
@@ -46,14 +46,14 @@ class Packet
   end
   
   def encode()
-    return self._encode(self.HEADER, @fields)
+    Encode::by_pattern(@fields, self.HEADER)
   end
   
   ##
   # Decode a binary string into a packet, decode_head will never return
   # trailing un-decoded data, even if it is present
   def self.decode_with_offset(data, offset = 0)
-    fields, off = Decode::by_pattern(data, self::HEADER, offset: offset)
+    fields, offset = Decode::by_pattern(data, self::HEADER, offset: offset)
     pk = self.new(fields)
 
     return pk, offset
@@ -69,6 +69,7 @@ class Packet
   def valid?
     begin
       for f, v in @fields
+        next unless v.is_a? String # allow special handling for place-holder fields
         [v].pack(self.HEADER[f])
       end
       return true
@@ -82,7 +83,7 @@ class Packet
 
     # define the accessor, then call the method as normal
     # if it fails after this it's your (the user's) fault
-    if self.HEADER.except(self.HIDDEN).include? base
+    if self.HEADER.except(*self.HIDDEN).include? base
       self.class.define_method base do
         to_const(base, @fields[base])
       end
@@ -92,7 +93,19 @@ class Packet
       end
 
       return self.method(name).(*args)
-    elsif @fields.except(self.HIDDEN).include? base
+    elsif @fields.include? :_flags and self.FLAGS.include? base
+      mask = self.FLAGS[base]
+
+      self.class.define_method base do
+        Integer(@fields[:_flags]).anybits?(mask)
+      end
+      
+      self.class.define_method "#{base}=" do |x|
+        x ? @fields[:_flags] |= mask : @fields[:_flags] &= ~mask
+      end
+
+      return self.method(name).(*args)
+    elsif @fields.except(*self.HIDDEN).include? base
       # same as above but only uses singleton methods
       # for variables that are present in @fields
       # but *not* HEADER.
@@ -108,8 +121,6 @@ class Packet
       end
 
       return self.method(name).(*args)
-    #elsif self.FLAGS.include? base
-    # PLANNED 
     end
 
     return super(name, *args)
@@ -124,22 +135,6 @@ class Packet
   end
   
   private
-  def _encode(pattern, params)
-    Hash(pattern)
-    Hash(params)
-
-    # collect parameters in correct order
-    fields = pattern.keys.map{ |x| params[x] }.flatten
-    encoding = pattern.values.join()
-
-    return fields.pack(encoding)
-  end
-  
-  # here for convenience, more advanced decoding
-  # should import this module directly
-  def self._decode(data, pattern, offset:0) = Decode.by_pattern(data, pattern, offset: offset)
-  private_class_method :_decode
-  
   def self.from_const(field, const)
     return self::CONST.dig(field, const) || const 
   end
