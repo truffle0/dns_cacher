@@ -3,6 +3,10 @@ require_relative 'decoders'
 
 ##
 # Representation and operations for DNS-related structures and packets
+# 
+# Exists as a proof-of-concept/alternate implementation, as Ruby already
+# has classes such as Resolv::DNS::Message that encapsulate these types.
+# This implementation may be used later to expand functionality however
 module DNS
   module Type
     @@type_ids = {}
@@ -56,6 +60,10 @@ module DNS
 
     # RFC-2671
     # OPT = def_type(:OPT, 41, ...)
+
+    # RFC-9460
+    #SVCB = def_type(:SVCB, ...)
+    #HTTPS = def_type(:HTTPS, ...)
 
     # allow standard types to be identified
     @@standard = [
@@ -115,7 +123,6 @@ module DNS
     #
     # Require for encode/decode, but can be calculated on the fly
     def rdlength = _encode(Type.struct(self.type), self.rdata).length
-
     def rdata = Type.struct(self.type).keys.map.with_object({}) { |k, h| h[k] = @fields[k] }
 
     HEADER = {

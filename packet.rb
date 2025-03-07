@@ -1,12 +1,13 @@
 require_relative 'decoders'
 
 ##
-# Set of tools for encoding/decoding data in binary packets
+# Class for efficiently storing encoding/decoding data in network packets
+# Intended to provide a basic and expandable implementation
 class Packet
   ##
   # defines the structure of the packet header
   # if the packet has no variable structure this can be used for the whole packet
-  HEADER = {}
+  HEADER = nil
   def HEADER = self.class::HEADER
 
   ##
@@ -23,7 +24,7 @@ class Packet
   # equivalent to "#define SYMBOL VALUE"
   # will allow specifying a symbol for a field in place
   # of it's numerical value.
-  CONST = {}
+  CONST = nil
   def CONST = self.class::CONST
 
   ##
@@ -35,7 +36,7 @@ class Packet
   HIDDEN = [ :_flags ]
   def HIDDEN = self.class::HIDDEN
 
-  FLAGS = {}
+  FLAGS = nil
   def FLAGS = self.class::FLAGS
   
   def initialize(fields = {})
@@ -58,6 +59,7 @@ class Packet
 
     return pk, offset
   end
+
 
   def self.decode(packet)
     return decode_with_offset(packet).first

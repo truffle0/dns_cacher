@@ -1,248 +1,225 @@
 #!/bin/env ruby
 
 require 'socket'
-require 'thread'
 require 'logger'
+require 'async'
+
 require_relative 'dns'
 
-$logger = Logger.new(STDOUT)
-
-$SERVERS = [
-  Addrinfo.udp("127.0.0.1", 1053),
-  Addrinfo.udp("127.0.0.1", 53),
+$ENDPOINTS = [
+  Addrinfo.udp('127.0.0.1', 53),
+  Addrinfo.udp('::1', 53),
 ]
+$MDNS_DOMAINS = [ "local" ]
+$NAMESERVERS = [ Addrinfo.udp('8.8.8.8', 53) ]
 
-##
-# Parses /etc/resolv.conf to determine system nameservers
-def get_nameservers
-  ns = /^nameserver\s*([\d\.:]+)\s*$/
-  servers = []
-  
-  File.open("/etc/resolv.conf") do |f|
-    f.readlines.each do |line|
-      servers << ns.match(line)[1] if ns.match? line
-    end
-  end
+$PATIENCE = 2
 
-  return servers.map{|x| IPAddr.new x}
-end
+$logger = Logger.new STDOUT
 
-class RecordCache
-  CacheKey = Struct.new(:name, :type)
-  CacheQuery = Struct.new(:records, :expiry)
+# Cache responses from DNS queries
+# automatically purges once TTL has expired
+class Cache
+  CacheKey = Struct.new(:domain, :rcode)
 
   def initialize
     @cache = {}
-    @lock = Mutex.new
   end
-  
-  def add(domain, type, records)
-    String(domain)
-    raise TypeError.new("Type '#{type}' not a Symbol") unless type.is_a? Symbol
-    
-    # find the minimum ttl in the records (ttl 0 will not be cached)
+
+  def store(domain, rcode, records)
     ttl = records.map{|x| x.ttl}.min
-    return false if ttl == 0
+    key = CacheKey.new(domain, rcode)
     
-    key = CacheKey.new(domain, type)
-    value = CacheQuery.new(records, Time.now(in: ttl))
-
-    @lock.synchronize{ @cache[key] = value }
-    return true
-  end
-  
-  def search(domain, type)
-    key = CacheKey.new(domain, type)
-    rec = @lock.synchronize { @cache[key] }
-    
-    return rec.nil? ? nil : rec.records
-
-  end
-
-  def scan
-    now = Time.now
-    @lock.synchronize do
-      @cache.filter!{|key, val| val.expiry > now}
+    if ttl.nil? or ttl == 0
+      $logger.debug "Not caching #{domain} #{rcode} as ttl is 0"
+      return records
     end
 
-    return
+    @cache[key] = records
+
+    Async do
+      sleep ttl
+      $logger.debug "Purging #{key.domain} from cache after #{ttl}s"
+      @cache.delete key
+    end
+
+    return records
+  end
+
+  def fetch(domain, rcode)
+    @cache.fetch(CacheKey.new(domain, rcode), nil)
+  end
+
+end
+
+$CACHE = Cache.new
+
+# Extension to the DNS::Message class
+# adds functions that convert messages (in-place)
+# to predefined formats
+class DNS::Message
+  def fail_format!
+    self.qr = true
+    self.ra = true
+    self.rcode = 1
+
+    self.authority.clear()
+    self.additional.clear()
+
+    return self
+  end
+
+  # Formats message into
+  def fail_server!
+    self.qr = true
+    self.ra = self.aa = true
+    self.rcode = 2
+
+    self.authority.clear()
+    self.additional.clear()
+    
+    return self
+  end
+
+  # Formats message into a standard (successful) response
+  def response!
+    self.qr = true
+    self.ra = self.aa = true
+    self.rcode = 0
+
+    self.authority.clear()
+    self.additional.clear()
+
+    return self
+  end
+end
+
+module Resolver
+  # Query the system nameservers
+  #
+  # This is done directly instead of through the Resolv
+  # class to reuse existing encoding, and to allow
+  # later expansion to support more advanced protocols like DNSSEC
+  #
+  # (Personally, I also just wanted to learn about the DNS protocol)
+  def self.dns query
+    # Create a new socket for the outbound connection, and bind to an available port
+    s = Socket.new :INET, :DGRAM, 0
+    s.bind Addrinfo.udp('0.0.0.0', 0)
+
+    # forward query onto each available nameserver in turn
+    # until we get a response
+    packet = query.encode
+    reply, responder = $NAMESERVERS.each do |server|
+      s.sendmsg packet, 0, server
+
+      begin
+        reply, responder = s.recvmsg_nonblock
+        break reply, responder
+      rescue IO::WaitReadable
+        read, = IO.select([s], nil, nil, $PATIENCE)
+        retry unless read.nil? # indicates timeout rather than available IO
+      end
+    end
+
+    raise IOError.new "No one responded to query" if reply.nil?
+
+    unless responder.ip_address == $NAMESERVERS[0].ip_address
+      $logger.warn "Nameserver '#{$NAMESERVERS[0].ip_address}' was queried, but '#{responder.ip_address}' responded!"
+    end
+
+    return reply
+  end
+
+  def self.mdns query
+    s = Socket.new :INET, :DGRAM, 0
+    s.bind Addrinfo.udp("0.0.0.0", 0)
+ 
+    s.sendmsg query.encode, 0, Addrinfo.udp("224.0.0.251", 5353) # Standard mDNS multicast address
+
+    begin
+      reply, responder = s.recvmsg_nonblock
+    rescue IO::WaitReadable
+      read, = IO.select([s], nil, nil, $PATIENCE)
+      retry unless read.nil?
+      raise IOError "No one responded to query for #{query.question[0].qname}"
+    end
+
+    return reply
   end
 end
 
 class Server
-  def initialize(queue = nil, cache = nil)
-    @sockets = $SERVERS.each_with_object([]) do |addr, arr|
-      begin
-        sock = Socket.new :INET, :DGRAM, 0
-        sock.bind addr
-        arr << sock
-        
-        $logger.info("Server listening on #{addr.pfamily == Socket::SOCK_DGRAM ? "UDP" : "TCP"} #{addr.ip_address}:#{addr.ip_port}")
-      rescue SocketError, Errno::EACCES => e
-        $logger.warn("Binding server port #{addr.ip_address}:#{addr.ip_port} failed: #{e}")
-      end
-    end
+  def initialize addr
+    @addr = addr
+    @family = addr.ipv4? ? :INET : :INET6
 
-    @cache = cache.nil? ? $CACHE : cache
-    @queue = queue.nil? ? $QUEUE : queue
+    @socket = Socket.new @family, :DGRAM, 0
+    @socket.bind addr
   end
 
-  def enter
+  attr_reader :addr
+
+  def run
     loop do
-      IO.select(@sockets)[0].each do |sock|
-        begin
-          # recv request
-          packet, addr, *_ = sock.recvmsg_nonblock
-        
-          # decode message and parse question
-          query = DNS::Message.decode packet
-          @queue << [query, addr, sock]
-        rescue EncodingError => e
-          $logger.error "Query decode failed!\n#{e}"
-          next
-        end
+      query, client, = @socket.recvmsg
 
+      # Spawn a fibre to handle the query
+      # to remove wait time
+      Async do
+        resolve_query(query, client)
       end
     end
-  end
-
-  def spawn 
-    raise ThreadError.new("Worker thread already running!") unless @thread.nil?
-    t = Thread.new{enter}
-    @thread = t
-  end
-end
-
-class ResolvWorker
-  def initialize(queue = nil, cache = nil)
-    @queue = queue.nil? ? $QUEUE : queue
-    @cache = cache.nil? ? $CACHE : cache
-
-    @client = nil
-    @thread = nil
   end
   
-  def enter
-    loop do
-      query, ret_addr, serv_sock = @queue.pop
-
-      begin
-        raise TypeError.new("Unsupported DNS operation #{query.opcode}") if query.opcode != 0
-
-        # only allow a single question, like all dns servers in the wild
-        question = query.question.first
-        
-        if records = @cache.search(question.qname, question.qtype)
-          $logger.debug "Cache hit: #{question.qname}"
-          resp = query_answer! query, records
-        else
-          $logger.debug "Cache miss: #{question.qname}"
-          resp = DNS::Message.decode forward_query(query.encode)
-
-          # cache returned values, but keep response as is
-          if resp.qr and resp.rcode == 0 and resp.opcode == 0 and not resp.answer.empty?
-            @cache.add(question.qname, question.qtype, resp.answer)
-          else
-            $logger.debug "Transaction #{resp.id}, for #{resp.question[0].qname}, not cache-able"
-          end
-        end
-      rescue EncodingError => e
-        $logger.debug "Transaction #{query.id} failed due to server error!\n#{e}"
-      rescue TypeError => e
-        $logger.debug "Query type unsupported: #{e}"
-        resp = query_unsupported! query
-      ensure
-        # for internal server errors, inform the client
-        resp ||= query_failure query.id, question.question
-
-        # at least something must be sent
-        serv_sock.send resp.encode, 0, ret_addr
-      end
-    end
+  def forward_query query
+    domain = query.question[0].qname
+    domain.end_with?("local") ? Resolver.mdns(query) : Resolver.dns(query)
   end
 
-  def spawn
-    raise ThreadError.new("Worker thread already running!") unless @thread.nil?
-    t = Thread.new{enter}
-    @thread = t
-  end
+  def resolve_query packet, client
+    query = DNS::Message.decode packet
 
-  def query_failure(id, questions)
-    msg = DNS::Message.new(id: id, question: questions)
-    # server failure
-    msg.rcode = 2
+    # in theory the DNS protocol can handle multiple requests
+    # but in practice they reject any request that does this
+    raise EncodingError unless query.question.length == 1
+    question = query.question[0]
 
-    # set response
-    msg.qr = true
+    if records = $CACHE.fetch(question.qname, question.qtype)
+      $logger.debug "Query from #{client.ip_address}:#{client.ip_port} - #{question.qname} #{question.qtype} (cache hit)"
+      query.answer = records
+      reply = query.response!
 
-    # ensure capabilities are set right
-    msg.ra = msg.aa = false
+      @socket.sendmsg reply.encode, 0, client
+    else
+      $logger.debug "Query from #{client.ip_address}:#{client.ip_port} - #{question.qname} #{question.qtype} (cache miss)"
+      packet = forward_query query
+      @socket.sendmsg packet, 0, client
 
-    # clear sections we don't do
-    msg.answer.clear()
-    msg.authority.clear()
-    msg.additional.clear()
-
-    return msg
-  end
-
-  def query_unsupported!(msg)
-    # return code and caps
-    msg.rcode = 4
-    msg.qr = true
-    msg.ra = msg.aa = false
-
-    msg.answer.clear()
-    msg.authority.clear()
-    msg.additional.clear()
-
-    return msg
-  end
-
-  def query_answer!(msg, answers)
-    # return code and caps
-    msg.rcode = 0
-    msg.qr = true
-    msg.ra = msg.aa = false
-
-    # set sections
-    msg.answer = answers
-    msg.authority.clear()
-    msg.additional.clear()
-    
-    return msg
-  end
-
-  def forward_query msg
-    s = Socket.new :INET, :DGRAM, 0
-    s.bind Addrinfo.udp("0.0.0.0", 0)
-    
-    # send query and wait for reply
-    s.send msg, 0, $NAMESERVERS[0]
-    resp, addr, *_ = s.recvmsg
-    
-    if addr.ip_address != $NAMESERVERS[0].ip_address
-      $logger.warn "Sent query to #{$NAMESERVERS[0].ip_address}, but received reply from #{addr.ip_address}"
+      reply = DNS::Message.decode packet
+      $CACHE.store(question.qname, question.qtype, reply.answer + reply.authority)
     end
 
-    return resp
-  ensure
-    s.close
+  rescue EncodingError
+    @socket.sendmsg query.fail_format!.encode, 0, client
+  rescue Exception => e
+    @socket.sendmsg query.fail_server!.encode, 0, client
+    $logger.error "Internal server failure!"
+    raise e
   end
+
 end
 
 def main
-  # Fetch nameservers excluding loopback
-  $NAMESERVERS = get_nameservers().filter{|x| not x.loopback?}.map{|x| Addrinfo.udp x.to_s, 53}
-  $NAMESERVERS.each { |x| $logger.info "Using upstream nameserver: #{x.ip_address}:#{x.ip_port}" }
- 
-  # create queue and cache
-  $QUEUE = Queue.new
-  $CACHE = RecordCache.new
+  scheduler = Async::Scheduler.new
+  Fiber.set_scheduler(scheduler)
 
-  # start server loop
-  Server.new.spawn
-  ResolvWorker.new.enter
+  servers = $ENDPOINTS.each_with_object([]) {|addr,arr| arr << Server.new(addr) }
+
+  servers.each do |s|
+    $logger.info "Server listening on #{s.addr.ip_address}:#{s.addr.ip_port}"
+    Fiber.schedule { s.run }
+  end
 end
 
-main() if __FILE__ == $0
+main if __FILE__ == $0
