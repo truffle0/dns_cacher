@@ -38,18 +38,18 @@ class Packet
 
   FLAGS = nil
   def FLAGS = self.class::FLAGS
-  
+
   def initialize(fields = {})
     @fields = {}
     for k in self.HEADER.except(self.HIDDEN).keys
       @fields[k] = from_const(k, fields[k])
     end
   end
-  
+
   def encode()
     Encode::by_pattern(@fields, self.HEADER)
   end
-  
+
   ##
   # Decode a binary string into a packet, decode_head will never return
   # trailing un-decoded data, even if it is present
@@ -101,7 +101,7 @@ class Packet
       self.class.define_method base do
         Integer(@fields[:_flags]).anybits?(mask)
       end
-      
+
       self.class.define_method "#{base}=" do |x|
         x ? @fields[:_flags] |= mask : @fields[:_flags] &= ~mask
       end
@@ -135,10 +135,10 @@ class Packet
   def [](field)
     return @fields[field]
   end
-  
+
   private
   def self.from_const(field, const)
-    return self::CONST.dig(field, const) || const 
+    return self::CONST.dig(field, const) || const
   end
   def from_const(*a)
     self.class.from_const(*a)

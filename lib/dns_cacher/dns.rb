@@ -3,7 +3,7 @@ require_relative 'decoders'
 
 ##
 # Representation and operations for DNS-related structures and packets
-# 
+#
 # Exists as a proof-of-concept/alternate implementation, as Ruby already
 # has classes such as Resolv::DNS::Message that encapsulate these types.
 # This implementation may be used later to expand functionality however
@@ -81,7 +81,7 @@ module DNS
     # Define additional QTypes from the
 
     include Type
-    
+
     # RFC-1035
     AXFR = Type.def_type(:AXFR, 252, nil)
     MAILB = Type.def_type(:MAILB, 253, nil)
@@ -175,11 +175,11 @@ module DNS
     # Decode a record from a binary packet
     def self.decode_with_offset(packet, offset = 0)
         fields, offset = Decode.by_pattern(packet, self::HEADER, offset: offset)
-        
+
         unless fields[:rdlength] <= (packet.length - offset)
           raise EncodingError.new("reported rdata length #{fields[:rdlength]} exceeds the rest of the packet length #{packet.length - offset}")
         end
-        
+
         record_type = Type.struct(to_const(:type, fields[:type]))
         #raise EncodingError.new("Unrecognised record type: #{fields[:type]}")
 
@@ -341,7 +341,7 @@ module DNS
 
       return self.new(header.merge(sections)), offset
     end
-    
+
     ## Methods to convert (in-place) between standard message formats ##
     def fail_format!
       self.qr = true
@@ -362,7 +362,7 @@ module DNS
 
       self.authority.clear()
       self.additional.clear()
-      
+
       return self
     end
 

@@ -26,7 +26,7 @@ Sync do
   # Setup and run a BasicServer (name is a bit inaccurate, it does quite a bit)
   server = DNSCacher::BasicServer.new($DEFAULT_ENDPOINTS, ARGV.include?("--debug"))
   server.run
-  
+
   # report once server is running
   $logger.info "Server setup complete"
 
@@ -39,7 +39,7 @@ Sync do
       new_uid = Process::UID.from_name("nobody")
       Process.change_priviledge(new_uid)
     end
-    
+
     # Detach into background
     Process.daemon if ARGV.include? "-D"
   end

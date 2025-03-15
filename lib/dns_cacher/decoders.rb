@@ -11,7 +11,7 @@ module Decode
   # can be a mix of Strings that get passed directly to the *unpack* function, a symbol of
   # another function within this module that can decode complex data, or a Packet class from which
   # the *decode_with_offset* method will be used
-  # 
+  #
   # @return Hash Fields with keys matching the pattern param, and values being the parsed data
   def self.by_pattern(data, pattern = {}, offset: 0)
     raise EncodingError.new("Cannot parse empty pattern!") if Hash(pattern).empty?
@@ -35,15 +35,15 @@ module Decode
       # determine the number of characters in the field, i.e. the number of elements
       # from the parsed array to collect for it (skips control characters 'x' and 'X')
       #n = shape.scan(/\p{L}/).filter{|x| not 'xX'.include? x}.count
-      
+
       # collect the number of values to match the field
       # or, if only 1, just great the next one (without wrapping in an Array)
       #parsed[field] = n > 1 ? values.take(n) : values.next
     end
-     
+
     return parsed, offset
   end
-  
+
   ##
   # Decode.by_shape
   # Similar to the previous *Decode.by_pattern*, but instead takes an Array
@@ -79,7 +79,7 @@ module Decode
   # Parses a domain string array starting at *offset*
   # Data is made up of multiple non-null-terminated strings
   # where the length is specified by a single byte at the start
-  # 
+  #
   # null-byte indicates the end of the data
   #
   # @param [String] data
@@ -99,7 +99,7 @@ module Decode
       # 11 = pointer
       # 01/10 = undefined
       type = (data.unpack1("C", offset: offset) & 0xC0) >> 6 # mask bits 1 & 2
-      
+
       case type
       when 0
         # indicates it's a single octet that encodes a strlen (or a null byte)
@@ -114,11 +114,11 @@ module Decode
         # find the actual pointer, which is a word not a byte
         pointer = data.unpack1("n", offset: offset) & 0x3FFF # remove top 2 bits
         offset += 2
-        
+
         unless pointer.between? 0, start-1
           raise EncodingError.new("Invalid or circular name pointer: #{pointer}")
         end
-        
+
         remainder, rem_offset = self.domain_string_array(data, offset: pointer)
         strings += remainder.split('.')
 
@@ -199,14 +199,14 @@ module Encode
   # @return [String] encoded byte-string
   def self.domain_string_array(data)
     data = data.split(".") unless data.is_a? Array
-    
+
     # ASCII-8BIT is the encoding used the pack/unpack functions
     # things get weird later if unicode is used here
     encoding = data.each_with_object("".encode("ASCII-8BIT")) do |str, packed|
       if str.length > 63 or not str.ascii_only?
         raise EncodingError.new("String '#{str}' exceeds max length of 63-bytes")
       end
-      
+
       packed << [str.length].pack("C") << [str].pack("A*")
     end
 
@@ -214,7 +214,7 @@ module Encode
     encoding << "\x00"
     return encoding
   end
-  
+
   require 'socket'
 
   ##

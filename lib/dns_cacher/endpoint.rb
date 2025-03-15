@@ -31,7 +31,7 @@ module DNSCacher
           # call handler, capture reply and relay back to client
           reply = handler.call(packet)
           raise EncodingError.new("Expecting a string, but received #{reply.class}") unless reply.is_a? String
-          
+
           @socket.sendmsg reply, 0, client
         end
       end

@@ -19,7 +19,7 @@ module DNSCacher
   module Resolver
     # TODO: needs to be configurable at runtime
     MDNS_DOMAIN = /.*\.local$/
-    
+
     # How long in seconds (by default) the resolver is willing to wait for a reply
     PATIENCE = 2
 

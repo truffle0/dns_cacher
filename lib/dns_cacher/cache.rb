@@ -19,7 +19,7 @@ module DNSCacher
     def store(domain, rcode, records)
       ttl = records.map{|x| x.ttl}.min
       key = CacheKey.new(domain, rcode)
-      
+
       if ttl.nil? or ttl == 0
         return nil
       end
