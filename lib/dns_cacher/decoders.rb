@@ -1,10 +1,22 @@
 require 'ipaddr'
 
 module Decode
+  ##
+  # Decode.by_pattern
+  # Parses a hash representing the order/types of fields in the packet
+  # and pattern and decodes it into a hash of fields with matching keys
+  #
+  # @param String Binary Data
+  # @param Hash Ordered hash of pattern, keys represent field names & values the data types
+  # can be a mix of Strings that get passed directly to the *unpack* function, a symbol of
+  # another function within this module that can decode complex data, or a Packet class from which
+  # the *decode_with_offset* method will be used
+  # 
+  # @return Hash Fields with keys matching the pattern param, and values being the parsed data
   def self.by_pattern(data, pattern = {}, offset: 0)
     raise EncodingError.new("Cannot parse empty pattern!") if Hash(pattern).empty?
     String(data)
-    
+
     parsed = {}
     pattern.each do |field, shape|
       case shape
@@ -30,6 +42,36 @@ module Decode
     end
      
     return parsed, offset
+  end
+  
+  ##
+  # Decode.by_shape
+  # Similar to the previous *Decode.by_pattern*, but instead takes an Array
+  # then returns parsed values in order, with the last value being the new offset
+  #
+  # @param String Binary data
+  # @param Array Shape of the data to be parsed, can contain a mix of String, Symbols or Packet classes
+  def self.by_shape(data, shape = [], offset: 0)
+    raise EncodingError.new("Cannot parse empty pattern!") if Array(pattern).empty?
+    String(data)
+
+    parsed = []
+    pattern.each do |shape|
+      case shape
+      when String
+        out, *ext, tail = data.unpack("#{shape}a*", offset: offset)
+        parsed << ext.length > 0 ? [out] + ext : out
+        offset = data.length - tail.length
+      when Symbol
+        parsed[field], offset = self.method(shape).(data, offset: offset)
+      when Packet
+        raise NotImplementedError
+      else
+        raise EncodingError.new("Unrecognised shape format: #{shape.class}")
+      end
+    end
+
+    return *parsed, offset
   end
 
   ##

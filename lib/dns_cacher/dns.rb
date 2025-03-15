@@ -339,5 +339,41 @@ module DNS
 
       return self.new(header.merge(sections)), offset
     end
+    
+    ## Methods to convert (in-place) between standard message formats ##
+    def fail_format!
+      self.qr = true
+      self.ra = true
+      self.rcode = 1
+
+      self.authority.clear()
+      self.additional.clear()
+
+      return self
+    end
+
+    # Formats message into
+    def fail_server!
+      self.qr = true
+      self.ra = self.aa = true
+      self.rcode = 2
+
+      self.authority.clear()
+      self.additional.clear()
+      
+      return self
+    end
+
+    # Formats message into a standard (successful) response
+    def response!
+      self.qr = true
+      self.ra = self.aa = true
+      self.rcode = 0
+
+      self.authority.clear()
+      self.additional.clear()
+
+      return self
+    end
   end
 end

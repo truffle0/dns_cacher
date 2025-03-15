@@ -1,0 +1,50 @@
+#!/bin/env ruby
+require 'dns_cacher'
+require 'logger'
+require 'async'
+
+require 'rb-inotify'
+
+if ARGV.include? "-h" or ARGV.include? "--help"
+  puts "Usage: dns_cache [-B]"
+  exit! 0
+end
+
+# default endpoints, will be overwritten by config
+$DEFAULT_ENDPOINTS = [
+  Addrinfo.udp("127.0.0.1", 1053),
+  Addrinfo.udp("::1", 1053),
+]
+
+# initialize logging
+$logger ||= Logger.new STDOUT
+$logger.level = Logger::DEBUG
+
+Fiber.set_scheduler(Async::Scheduler.new)
+Server.logger = $logger
+
+# initialize a new cache
+cache = Server::Cache.new
+
+# read resolv.conf for nameservers and set up inotify to re-read when modified
+# must be put in a dedicated thread as rb-inotify doesn't play nice with async
+Thread.new do
+  notifier = INotify::Notifier.new
+  notifier.watch("/etc/resolv.conf", :modify) do |event|
+    $logger.info "Detected change to resolv.conf..."
+    Server.update_nameservers!
+  end
+
+  notifier.run
+end
+Server.update_nameservers!
+
+# create and run all server threads
+servers = $DEFAULT_ENDPOINTS.each_with_object([]) {|addr,arr| arr << Server::Endpoint.new(addr, cache) }
+servers.each do |s|
+  $logger.info "Server listening on #{s.addr.ip_address}:#{s.addr.ip_port}"
+  Fiber.schedule { s.run }
+end
+
+# finish by backgrounding the process
+Process.daemon unless ARGV.include? "-B"
