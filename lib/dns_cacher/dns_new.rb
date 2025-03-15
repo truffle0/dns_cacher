@@ -7,7 +7,7 @@ module DNS
 
     def Record.def_type(id, struct)
       return Struct.new(*(@@header + struct.keys)) do
-        
+
       end
     end
 
@@ -17,7 +17,7 @@ module DNS
     end
 
     A = Type(1, address: :ipv4_addr)
-    
+
   end
 
   module DClass
@@ -29,7 +29,7 @@ module DNS
     PATTERN = [ :domain_string_array, "n", "n", "N", "n" ]
 
     def encode
-      
+
     end
 
     def self.decode_with_offset(packet, offset = 0)
