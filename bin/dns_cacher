@@ -1,16 +1,13 @@
 #!/bin/env ruby
 require 'dns_cacher'
-
-require 'logger'
 require 'async'
-require 'rb-inotify'
 
 if ARGV.include? "-h" or ARGV.include? "--help"
   puts "Usage: dns_cache [-D] [--debug]"
   exit! 0
 end
 
-# default endpoints, will be overwritten by config
+# default endpoints, should be overwritten by config
 $DEFAULT_ENDPOINTS = [
   Addrinfo.udp("127.0.0.1", Process.uid == 0 ? 53 : 1053),
   Addrinfo.udp("::1", Process.uid == 0 ? 53 : 1053),
@@ -20,37 +17,33 @@ $DEFAULT_ENDPOINTS = [
 # initialize logging
 $logger ||= Logger.new STDOUT
 $logger.level = ARGV.include?("--debug") ? Logger::DEBUG : Logger::INFO
-# override global server logger
-Server::LOGGER = $logger
 
 unless Process.uid == 0
   $logger.warn "Not running as root, unable to bind local ports < 1000"
 end
 
-Fiber.set_scheduler(Async::Scheduler.new)
+Sync do
+  # Setup and run a BasicServer (name is a bit inaccurate, it does quite a bit)
+  server = DNSCacher::BasicServer.new($DEFAULT_ENDPOINTS, ARGV.include?("--debug"))
+  server.run
+  
+  # report once server is running
+  $logger.info "Server setup complete"
 
-# initialize a cache
-cache = Server::Cache.new
-
-# read resolv.conf for nameservers and set up inotify to re-read when modified
-# must be put in a dedicated thread as rb-inotify doesn't play nice with async
-Thread.new do
-  notifier = INotify::Notifier.new
-  notifier.watch("/etc/resolv.conf", :modify) do |event|
-    $logger.info "Detected change to resolv.conf..."
-    Server.update_nameservers!
+  # operations when process requests to daemonize
+  if ARGV.include? "-D"
+    # If we are running as root, drop privilege after setup
+    # avoid unnecessary security risk
+    if Process.uid == 0
+      $logger.info "Dropping root privileges"
+      new_uid = Process::UID.from_name("nobody")
+      Process.change_priviledge(new_uid)
+    end
+    
+    # Detach into background
+    Process.daemon if ARGV.include? "-D"
   end
 
-  notifier.run
+  # Now just idle until the server dies
+  server.await
 end
-Server.update_nameservers!
-
-# create and run all server threads
-servers = $DEFAULT_ENDPOINTS.each_with_object([]) {|addr,arr| arr << Server::Endpoint.new(addr, cache) }
-servers.each do |s|
-  $logger.info "Server listening on #{s.addr.ip_address}:#{s.addr.ip_port}"
-  Fiber.schedule { s.run }
-end
-
-# finish by daemonizing the process if requested
-Process.daemon if ARGV.include? "-D"

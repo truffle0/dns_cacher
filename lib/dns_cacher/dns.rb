@@ -7,6 +7,8 @@ require_relative 'decoders'
 # Exists as a proof-of-concept/alternate implementation, as Ruby already
 # has classes such as Resolv::DNS::Message that encapsulate these types.
 # This implementation may be used later to expand functionality however
+#
+# TODO: overhaul entire module, implementation is functional but messy
 module DNS
   module Type
     @@type_ids = {}

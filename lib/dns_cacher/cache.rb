@@ -1,9 +1,9 @@
-require 'async'
-require 'logger'
-
 require_relative 'dns'
 
-module Server
+require 'async'
+require 'async/barrier'
+
+module DNSCacher
   # Cache responses from DNS queries
   # automatically purges once TTL has expired
   class Cache
@@ -11,6 +11,9 @@ module Server
 
     def initialize
       @cache = {}
+
+      # For tracking/cleanup of timer tasks
+      @barrier = Async::Barrier.new
     end
 
     def store(domain, rcode, records)
@@ -18,15 +21,13 @@ module Server
       key = CacheKey.new(domain, rcode)
       
       if ttl.nil? or ttl == 0
-        $logger.debug "Not caching #{domain} #{rcode} as ttl is 0"
-        return records
+        return nil
       end
 
       @cache[key] = records
 
-      Async do
+      @barrier.async do
         sleep ttl
-        $logger.debug "Purging #{key.domain} from cache after #{ttl}s"
         @cache.delete key
       end
 
@@ -37,5 +38,8 @@ module Server
       @cache.fetch(CacheKey.new(domain, rcode), nil)
     end
 
+    def finalize obj_id
+      @barrier.stop
+    end
   end
 end
