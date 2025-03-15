@@ -46,13 +46,15 @@ module DNSCacher
 
         # Start up listener for nameserver updates
         # currently a Thread (not async) has to be used as inotify-rb hangs the async reactor :(
-        # TODO: implement using async rather than thread (potentially unsafe)
+        # TODO: implement using async rather than separate thread if possible
         @notifier = Thread.new do
           @logger.info("Started INotify listener for /etc/resolv.conf")
           notifier = INotify::Notifier.new
           notifier.watch("/etc/resolv.conf", :modify) do |event|
-            # WARN: this is not a sync'd opeartion, it does not have the potential
-            # to do (much?) damage based on how it is used, but should be fixed
+            @logger.debug "Detected change to /etc/resolv.conf"
+
+            # WARN: this is not a sync'd opeartion, it shouldn't have the potential
+            # to do (much?) damage based on how @nameservers isused, but should be fixed anyway
             @nameservers = DNSCacher.update_nameservers
           end
         end
