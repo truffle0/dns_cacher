@@ -9,6 +9,8 @@ module Server
   MDNS_DOMAINS = [ "local" ]
   PATIENCE = 2
 
+  LOGGER = Logger.new nil
+
   NAMESERVERS = []
   def self.update_nameservers!(source = "/etc/resolv.conf")
     NAMESERVERS.clear
@@ -24,15 +26,9 @@ module Server
       next if addr.ipv4_loopback? or addr.ipv6_loopback?
 
       NAMESERVERS << addr
-      $logger.info "Using nameserver #{md[:addr]}"
+      LOGGER.info "Using nameserver #{md[:addr]}"
     end
   end
-
-  @@logger = nil
-  def self.logger=(x)
-    @@logger = x
-  end
-  def self.logger = @@logger
 
   module Resolver
     # Query the system nameservers
@@ -65,7 +61,7 @@ module Server
       raise IOError.new "No one responded to query" if reply.nil?
 
       unless responder.ip_address == nameservers[0].ip_address
-        LOGGER.warn "Nameserver '#{nameservers[0].ip_address}' was queried, but '#{responder.ip_address}' responded!" unless LOGGER.nil?
+        LOGGER.warn "Nameserver '#{nameservers[0].ip_address}' was queried, but '#{responder.ip_address}' responded!"
       end
 
       return reply
@@ -135,13 +131,13 @@ module Server
       question = query.question[0]
 
       if not @cache.nil? and records = @cache.fetch(question.qname, question.qtype)
-        LOGGER.debug{"Query from #{client.ip_address}:#{client.ip_port} - #{question.qname} #{question.qtype} (cache hit)"} unless LOGGER.nil?
+        LOGGER.debug{"Query from #{client.ip_address}:#{client.ip_port} - #{question.qname} #{question.qtype} (cache hit)"}
         query.answer = records
         reply = query.response!
 
         @socket.sendmsg reply.encode, 0, client
       else
-        LOGGER.debug{"Query from #{client.ip_address}:#{client.ip_port} - #{question.qname} #{question.qtype} (cache miss)"} unless LOOGER.nil?
+        LOGGER.debug{"Query from #{client.ip_address}:#{client.ip_port} - #{question.qname} #{question.qtype} (cache miss)"}
         packet = forward_query query
         @socket.sendmsg packet, 0, client
 
@@ -153,7 +149,7 @@ module Server
       @socket.sendmsg query.fail_format!.encode, 0, client
     rescue Exception => e
       @socket.sendmsg query.fail_server!.encode, 0, client
-      LOGGER.error "Internal server failure!" unless LOGGER.nil?
+      LOGGER.error "Internal server failure!"
       raise e
     end
 

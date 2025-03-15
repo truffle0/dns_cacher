@@ -1,29 +1,35 @@
 #!/bin/env ruby
 require 'dns_cacher'
+
 require 'logger'
 require 'async'
-
 require 'rb-inotify'
 
 if ARGV.include? "-h" or ARGV.include? "--help"
-  puts "Usage: dns_cache [-B]"
+  puts "Usage: dns_cache [-D] [--debug]"
   exit! 0
 end
 
 # default endpoints, will be overwritten by config
 $DEFAULT_ENDPOINTS = [
-  Addrinfo.udp("127.0.0.1", 1053),
-  Addrinfo.udp("::1", 1053),
+  Addrinfo.udp("127.0.0.1", Process.uid == 0 ? 53 : 1053),
+  Addrinfo.udp("::1", Process.uid == 0 ? 53 : 1053),
 ]
 
+# TODO: convert all logging to Syslog
 # initialize logging
 $logger ||= Logger.new STDOUT
-$logger.level = Logger::DEBUG
+$logger.level = ARGV.include?("--debug") ? Logger::DEBUG : Logger::INFO
+# override global server logger
+Server::LOGGER = $logger
+
+unless Process.uid == 0
+  $logger.warn "Not running as root, unable to bind local ports < 1000"
+end
 
 Fiber.set_scheduler(Async::Scheduler.new)
-Server.logger = $logger
 
-# initialize a new cache
+# initialize a cache
 cache = Server::Cache.new
 
 # read resolv.conf for nameservers and set up inotify to re-read when modified
@@ -46,5 +52,5 @@ servers.each do |s|
   Fiber.schedule { s.run }
 end
 
-# finish by backgrounding the process
-Process.daemon unless ARGV.include? "-B"
+# finish by daemonizing the process if requested
+Process.daemon if ARGV.include? "-D"
