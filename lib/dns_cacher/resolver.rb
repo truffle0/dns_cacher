@@ -21,7 +21,10 @@ module DNSCacher
     MDNS_DOMAIN = /.*\.local$/
 
     # How long in seconds (by default) the resolver is willing to wait for a reply
-    PATIENCE = 2
+    PATIENCE = 2000
+
+    # How many times servers will be retried before giving up
+    RETRIES = 2
 
     def self.general_query(query, nameservers)
       domain = query.question[0].qname
@@ -40,6 +43,8 @@ module DNSCacher
     #
     # (Personally, I also just wanted to learn about the DNS protocol)
     def self.dns(query, nameservers, patience: PATIENCE)
+      raise IOError.new "No available nameservers" if nameservers.empty?
+
       # Create a new socket for the outbound connection, and bind to an available port
       s = Socket.new :INET, :DGRAM, 0
       s.bind Addrinfo.udp('0.0.0.0', 0)
@@ -47,7 +52,7 @@ module DNSCacher
       # forward query onto each available nameserver in turn
       # until we get a response
       packet = query.encode
-      reply, responder = nameservers.each do |server|
+      reply, responder = (nameservers * RETRIES).each do |server|
         s.sendmsg packet, 0, server
 
         begin
@@ -55,11 +60,12 @@ module DNSCacher
           break reply, responder
         rescue IO::WaitReadable
           read, = IO.select([s], nil, nil, PATIENCE)
-          retry unless read.nil? # indicates timeout rather than available IO
+          break nil if read.nil? # indicates timeout rather than available IO
+          retry
         end
       end
 
-      raise IOError.new "No one responded to query" if reply.nil?
+      raise IOError.new "No response" if reply.nil?
 
       unless responder.ip_address == nameservers[0].ip_address
         LOGGER.warn "Nameserver '#{nameservers[0].ip_address}' was queried, but '#{responder.ip_address}' responded!"

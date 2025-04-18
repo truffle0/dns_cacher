@@ -27,10 +27,12 @@ module DNSCacher
         packet, client, = @socket.recvmsg
 
         # Spawn async query handler using use block
-        @semaphore.async do |task|
+        # Passing 'client' and 'packet' is required to ensure the block
+        # doesn't try to reference outside it's scope (as these variables will likely change)
+        @semaphore.async(client, packet) do |task, client, packet|
           # call handler, capture reply and relay back to client
           reply = handler.call(packet)
-          raise EncodingError.new("Expecting a string, but received #{reply.class}") unless reply.is_a? String
+          raise EncodingError.new("Expecting binary string, but received #{reply.class}") unless reply.is_a? String
 
           @socket.sendmsg reply, 0, client
         end

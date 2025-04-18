@@ -1,49 +1,68 @@
 #!/bin/env ruby
+# frozen_string_literal: true
 require 'dns_cacher'
 require 'async'
+require 'logger'
+require 'syslog/logger'
 
 if ARGV.include? "-h" or ARGV.include? "--help"
-  puts "Usage: dns_cache [-D] [--debug]"
+  puts "Usage: dns_cache [options]" +
+    "  -D, --daemon     Start in daemon mode" +
+    "      --debug      Enable verbose debug logging" +
+    "      --pidfile=   Set PID file location (daemon mode only)" +
+    "  -u, --user=      User to switch to after setup (only when started as root)" +
+    "  -g, --group=     Group to switch to after setup (only when started as root)"
   exit! 0
+end
+
+DAEMON = ARGV.include?("-D") or ARGV.include?("--daemon").freeze
+DEBUG = ARGV.include?("--debug").freeze
+ROOT = (Process.uid == 0).freeze
+
+# if called as a daemon immediately fork to background
+if DAEMON
+  Process.daemon
+
+  $pidfile = File.open("/run/dns_cacher.pid")
+  $pidfile.write Process.pid
+
+  $logger = Syslog.logger.new "DNS_Cacher", 3
+else
+  $logger = Logger.new STDOUT
+  $logger.level = DEBUG ? Logger::DEBUG : Logger::INFO
+end
+
+unless ROOT
+  $logger.warn "Not running as root, unable to bind local ports < 1000"
 end
 
 # default endpoints, should be overwritten by config
 $DEFAULT_ENDPOINTS = [
-  Addrinfo.udp("127.0.0.1", Process.uid == 0 ? 53 : 1053),
-  Addrinfo.udp("::1", Process.uid == 0 ? 53 : 1053),
+  Addrinfo.udp("127.0.0.1", ROOT ? 53 : 1053),
+  Addrinfo.udp("::1", ROOT ? 53 : 1053),
 ]
 
-# TODO: convert all logging to Syslog
-# initialize logging
-$logger ||= Logger.new STDOUT
-$logger.level = ARGV.include?("--debug") ? Logger::DEBUG : Logger::INFO
-
-unless Process.uid == 0
-  $logger.warn "Not running as root, unable to bind local ports < 1000"
-end
-
-Sync do
-  # Setup and run a BasicServer (name is a bit inaccurate, it does quite a bit)
-  server = DNSCacher::BasicServer.new($DEFAULT_ENDPOINTS, ARGV.include?("--debug"))
-  server.run
-
-  # report once server is running
-  $logger.info "Server setup complete"
-
-  # operations when process requests to daemonize
-  if ARGV.include? "-D"
-    # If we are running as root, drop privilege after setup
-    # avoid unnecessary security risk
-    if Process.uid == 0
-      $logger.info "Dropping root privileges"
-      new_uid = Process::UID.from_name("nobody")
-      Process.change_priviledge(new_uid)
-    end
-
-    # Detach into background
-    Process.daemon if ARGV.include? "-D"
+# Allow code from this point runs within an async reactor
+Sync do |task|
+  Signal.trap "INT" do
+    task.reactor.interrupt
   end
 
-  # Now just idle until the server dies
-  server.await
+  # Setup and run a BasicServer (name is a bit inaccurate, it does quite a bit)
+  server = DNSCacher::BasicServer.new($DEFAULT_ENDPOINTS, DEBUG, $logger)
+
+
+  # If running as root, drop privileges after setup
+  # to avoid unnecessary security risk
+  if DAEMON and ROOT
+    $logger.info "Dropping root privileges"
+    new_uid = Process::UID.from_name("nobody")
+    Process.change_priviledge(new_uid)
+  end
+
+  # run the server and await the main fiber
+  $logger.info "Server setup complete"
+  server.run.wait
+ensure
+  $logger.info "Server shut down"
 end

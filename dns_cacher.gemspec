@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |s|
   s.name = "dns_cacher"
-  s.version = "0.2.1"
+  s.version = "0.2.2"
   s.license = "GPL-3.0"
 
   s.summary = "A minimal and lightweight local DNS/mDNS caching server"
@@ -18,5 +18,4 @@ Gem::Specification.new do |s|
   s.require_paths = ["lib"]
 
   s.add_dependency("async", "~>2.8")
-  s.add_dependency("rb-inotify", "~>0.11")
 end
