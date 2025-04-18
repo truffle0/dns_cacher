@@ -3,6 +3,8 @@ require_relative 'dns_cacher/endpoint'
 require_relative 'dns_cacher/cache'
 require_relative 'dns_cacher/resolver'
 
+#require_relative 'inotify/inotify'
+
 require 'async'
 require 'async/barrier'
 
@@ -41,6 +43,41 @@ module DNSCacher
       @fiber = Async do
         # tracks running endpoints
         barrier = Async::Barrier.new
+
+        # # Start up listener for system nameserver updates in resolv.conf
+        # # and autoupdate the current nameserver list
+        # barrier.async do |task|
+        #   notifier = INotify::Notifier.new
+        #   notifier.watch("/etc/resolv.conf", :modify) do
+        #     @logger.debug "Detected change to /etc/resolv.conf" if @debug
+        #
+        #     # WARN: this is not a sync'd opeartion, it shouldn't have the potential
+        #     # to do (much?) damage based on how @nameservers is used, but should be fixed anyway
+        #     @nameservers = DNSCacher.parse_nameservers
+        #   end
+        #
+        #   loop do
+        #     if IO.select([notifier.to_io],[],[],10)
+        #       notifier.process
+        #     end
+        #
+        #     @logger.debug "INotify hasn't caused a hang yet" if @debug
+        #   end
+        # end
+
+        # currently a Thread (not async) has to be used as inotify-rb hangs the async reactor :(
+        # TODO: implement using async rather than separate thread if possible
+        # @notifier = Thread.new do
+        #   @logger.info("Started INotify listener for /etc/resolv.conf")
+        #   notifier = INotify::Notifier.new
+        #   notifier.watch("/etc/resolv.conf", :modify) do |event|
+        #     @logger.debug "Detected change to /etc/resolv.conf" if @debug
+        #
+        #     # WARN: this is not a sync'd opeartion, it shouldn't have the potential
+        #     # to do (much?) damage based on how @nameservers is used, but should be fixed anyway
+        #     @nameservers = DNSCacher.update_nameservers
+        #   end
+        # end
 
         # Start up listening on all endpoints
         @endpoints.each do |endpoint|

@@ -1,2 +1,9 @@
 Gemfile.lock
 *.gem
+
+# ruby c extension ignores
+ext/**/.cache
+ext/**/compile_commands.json
+ext/**/*.o
+ext/**/*.so
+ext/**/Makefile
