@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |s|
   s.name = "dns_cacher"
-  s.version = "0.2.2"
+  s.version = "0.3.0"
   s.license = "GPL-3.0"
 
   s.summary = "A minimal and lightweight local DNS/mDNS caching server"
