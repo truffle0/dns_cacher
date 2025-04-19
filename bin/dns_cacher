@@ -6,27 +6,36 @@ require 'logger'
 require 'syslog/logger'
 
 if ARGV.include? "-h" or ARGV.include? "--help"
-  puts "Usage: dns_cache [options]" +
-    "  -D, --daemon     Start in daemon mode" +
-    "      --debug      Enable verbose debug logging" +
-    "      --pidfile=   Set PID file location (daemon mode only)" +
-    "  -u, --user=      User to switch to after setup (only when started as root)" +
-    "  -g, --group=     Group to switch to after setup (only when started as root)"
+  puts "Usage: dns_cache [options]\n" +
+    "  -D, --daemon     Start in daemon mode\n" +
+    "      --debug      Enable verbose debug logging\n" +
+    "      --pidfile=   Set PID file location (daemon mode only)\n" +
+    "  -u, --user       Switch to 'nobody' after setup\n"
+    #"  -u, --user=      User to switch to after setup (only when started as root)\n" +
+    #"  -g, --group=     Group to switch to after setup (only when started as root)\n"
   exit! 0
 end
 
-DAEMON = ARGV.include?("-D") or ARGV.include?("--daemon").freeze
-DEBUG = ARGV.include?("--debug").freeze
-ROOT = (Process.uid == 0).freeze
+DAEMON = ARGV.include?("-D") or ARGV.include?("--daemon")
+DEBUG = ARGV.include?("--debug")
+ROOT = (Process.uid == 0)
+DROP_PRIV = ARGV.include?("-u") or ARGV.include?("--user")
 
 # if called as a daemon immediately fork to background
+# TODO: find a better way of logging, this is a mess
 if DAEMON
-  Process.daemon
+  $logger = Syslog::Logger.new "dns_cacher", Syslog::LOG_DAEMON
+  $logger.level = DEBUG ? Syslog::LOG_DEBUG : Syslog::LOG_INFO
+  
+  begin
+    $pidfile = File.open("/run/dns_cacher.pid")
+    $pidfile.write Process.pid
+  rescue Errno::ENOENT
+    $logger.error "Failed to write PID file: /run/dns_cacher.pid"
+    $pidfile = nil
+  end
 
-  $pidfile = File.open("/run/dns_cacher.pid")
-  $pidfile.write Process.pid
-
-  $logger = Syslog.logger.new "DNS_Cacher", 3
+  Process.daemon unless DEBUG
 else
   $logger = Logger.new STDOUT
   $logger.level = DEBUG ? Logger::DEBUG : Logger::INFO
@@ -54,10 +63,10 @@ Sync do |task|
 
   # If running as root, drop privileges after setup
   # to avoid unnecessary security risk
-  if DAEMON and ROOT
+  if DAEMON and ROOT and DROP_PRIV
     $logger.info "Dropping root privileges"
     new_uid = Process::UID.from_name("nobody")
-    Process.change_priviledge(new_uid)
+    Process::UID.change_privilege(new_uid)
   end
 
   # run the server and await the main fiber
@@ -65,4 +74,11 @@ Sync do |task|
   server.run.wait
 ensure
   $logger.info "Server shut down"
+end
+
+if DAEMON and $pidfile
+  begin
+    File.delete($pidfile)
+  rescue Errno::ENOENT
+  end
 end
