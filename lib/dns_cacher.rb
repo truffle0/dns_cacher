@@ -12,19 +12,18 @@ module DNSCacher
   class BasicServer
     attr_reader :endpoints, :cache, :fiber
     attr_accessor :nameservers, :logger
-     
-    def initialize(endpoints = [], debug = false, logger = nil)
+
+    def initialize(endpoints = [], logger = nil)
       raise ArgumentError.new "No endpoints provided" if endpoints.empty?
 
       @logger = logger.nil? ? Logger.new(nil) : logger
-      @debug = debug
 
       @cache = Cache.new
       @nameservers = DNSCacher::parse_nameservers
       @nameservers.each do |addr|
         @logger.info "Using nameserver #{addr.ip_address}:#{addr.ip_port}"
       end
-      
+
       @endpoints = endpoints.each_with_object([]) do |addr, arr|
         arr << Endpoint.new(addr)
         @logger.info("Endpoint bound to #{addr.ip_address}:#{addr.ip_port}")
@@ -50,7 +49,7 @@ module DNSCacher
           end
 
         end
-        
+
         barrier.wait
       ensure
         barrier.stop
@@ -66,7 +65,7 @@ module DNSCacher
       question = query.question[0]
 
       if not @cache.nil? and records = @cache.fetch(question.qname, question.qtype)
-        @logger.debug{"Query for #{question.qname} (cache hit)"} if @debug
+        @logger.debug{"Query for #{question.qname} (cache hit)"}
 
         query.answer = records
         reply = query.response!
@@ -74,7 +73,7 @@ module DNSCacher
         return reply.encode
       else
         packet = Resolver::general_query(query, @nameservers)
-        @logger.debug{"Query for #{question.qname} (cache miss)"} if @debug
+        @logger.debug{"Query for #{question.qname} (cache miss)"}
 
         reply = DNS::Message.decode packet
         @cache.store(question.qname, question.qtype, reply.answer + reply.authority) unless @cache.nil?
@@ -83,11 +82,11 @@ module DNSCacher
 
     rescue EncodingError => e
       # Indicates packet encoding was invalid (or server is lacking some feature potentially)
-      @logger.debug "Received invalid query: #{e.detailed_message}" if @debug
+      @logger.debug "Received invalid query: #{e.detailed_message}"
       return query.fail_format!.encode
     rescue IOError => e
       # indicates an issue with query forwarding, either not response or no nameservers available
-      @logger.debug "Query for #{question.qname} failed: #{e.message}" if @debug
+      @logger.debug "Query for #{question.qname} failed: #{e.message}"
       return query.fail_server!.encode
     rescue Exception => e
       @logger.error("Internal server error:\n#{e.full_message}")
@@ -103,7 +102,7 @@ module DNSCacher
       # Stop notifier
       @notifier.exit.join
       @notifier = nil
-      
+
       # stop the main fiber to bring down all endpoints
       # and currently running tasks
       @fiber.stop
