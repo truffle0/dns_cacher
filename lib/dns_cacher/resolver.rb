@@ -1,5 +1,6 @@
-require_relative 'dns'
+#frozen_string_literal: true
 
+require_relative 'dns'
 require 'socket'
 
 module DNSCacher
@@ -15,13 +16,14 @@ module DNSCacher
       arr << addr
     end
   end
-
+  
+  # TODO: overhaul and create resolver class
   module Resolver
     # TODO: needs to be configurable at runtime
     MDNS_DOMAIN = /.*\.local$/
 
     # How long in seconds (by default) the resolver is willing to wait for a reply
-    PATIENCE = 2000
+    PATIENCE = 3
 
     # How many times servers will be retried before giving up
     RETRIES = 2
@@ -66,10 +68,11 @@ module DNSCacher
       end
 
       raise IOError.new "No response" if reply.nil?
-
-      unless responder.ip_address == nameservers[0].ip_address
-        LOGGER.warn "Nameserver '#{nameservers[0].ip_address}' was queried, but '#{responder.ip_address}' responded!"
-      end
+      
+      # TODO: proper checks and warnings
+      #unless responder.ip_address == nameservers[0].ip_address
+      #  raise IOError.new "Nameserver '#{nameservers[0].ip_address}' was queried, but '#{responder.ip_address}' responded!"
+      #end
 
       return reply
     end
@@ -85,10 +88,13 @@ module DNSCacher
       rescue IO::WaitReadable
         read, = IO.select([s], nil, nil, PATIENCE)
         retry unless read.nil?
-        raise IOError "No one responded to query for #{query.question[0].qname}"
+        raise IOError.new "No one responded to query for #{query.question[0].qname}"
       end
 
      return reply
+    rescue IOError
+      # With mDNS no response means success but server doesn't exist
+      return nil
     end
   end
 end

@@ -1,13 +1,21 @@
-require 'socket'
+#frozen_string_literal: true
 
+require 'socket'
 require 'async'
 require 'async/barrier'
 require 'async/semaphore'
 
 module DNSCacher
+  
+  # Server endpoint for clients to connect to
   class Endpoint
     attr_reader :addr, :family, :semaphore
-
+    
+    # Initialize Endpoint, currently only supports datagram mode
+    # @parameter addr [Addrinfo] Address for endpoint to (attempt to) bind to
+    # @parameter
+    #
+    # @raises [SocketError] If endpoint cannot be bound for any reason
     def initialize(addr, max_handlers=10)
       @addr = addr
       @family = addr.ipv4? ? :INET : :INET6
@@ -20,8 +28,12 @@ module DNSCacher
       # exceeding will halt reading new data temporarily
       @barrier = Async::Barrier.new
       @semaphore = Async::Semaphore.new(max_handlers, parent: @barrier)
+    rescue SystemCallError => e
+      raise SocketError.new e.detailed_message 
     end
-
+    
+    # Run Endpoint, accepts queries from clients and returns response
+    # @parameter handler [Proc] Block to handle queries, must accept and return a {DNS::Message}
     def run(&handler)
       loop do
         packet, client, = @socket.recvmsg
@@ -42,6 +54,7 @@ module DNSCacher
       @barrier.stop
     end
 
+    private
     def finalize obj_id
       @socket.close
     end

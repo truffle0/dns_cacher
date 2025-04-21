@@ -1,6 +1,7 @@
 #!/bin/env ruby
 # frozen_string_literal: true
-require 'dns_cacher'
+#require 'dns_cacher'
+require_relative '../lib/dns_cacher'
 require 'async'
 
 require 'optparse'
@@ -99,7 +100,12 @@ $DEFAULT_ENDPOINTS = [
 # Allow code from this point runs within an async reactor
 Sync do |task|
   Signal.trap("INT") do |signo|
-    $logger.info "Signal #{Signal::signame(signo)} received!"
+    if $logger.is_a? Syslog::Logger
+      $logger.info "Signal #{Signal::signame(signo)} received!"
+    else
+      puts "Signal #{Signal::signame(signo)} received!"
+    end
+
     task.reactor.interrupt
   end
 

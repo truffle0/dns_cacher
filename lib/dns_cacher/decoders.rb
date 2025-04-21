@@ -1,18 +1,19 @@
+#frozen_string_literal: true
+
 require 'ipaddr'
 
 module Decode
-  ##
-  # Decode.by_pattern
+
   # Parses a hash representing the order/types of fields in the packet
   # and pattern and decodes it into a hash of fields with matching keys
   #
-  # @param String Binary Data
-  # @param Hash Ordered hash of pattern, keys represent field names & values the data types
+  # @parameter data [String] Binary string to decode
+  # @param pattern [Hash] Ordered hash of pattern, keys represent field names & values the data types
   # can be a mix of Strings that get passed directly to the *unpack* function, a symbol of
   # another function within this module that can decode complex data, or a Packet class from which
   # the *decode_with_offset* method will be used
   #
-  # @return Hash Fields with keys matching the pattern param, and values being the parsed data
+  # @returns [Hash] Fields with keys matching the pattern param, and values being the parsed data
   def self.by_pattern(data, pattern = {}, offset: 0)
     raise EncodingError.new("Cannot parse empty pattern!") if Hash(pattern).empty?
     String(data)
@@ -44,13 +45,11 @@ module Decode
     return parsed, offset
   end
 
-  ##
-  # Decode.by_shape
   # Similar to the previous *Decode.by_pattern*, but instead takes an Array
   # then returns parsed values in order, with the last value being the new offset
   #
-  # @param String Binary data
-  # @param Array Shape of the data to be parsed, can contain a mix of String, Symbols or Packet classes
+  # @parameter data [String] Binary data to decode
+  # @parameter shape [Array] Shape of the data to be parsed, can contain a mix of String, Symbols or Packet classes
   def self.by_shape(data, shape = [], offset: 0)
     raise EncodingError.new("Cannot parse empty pattern!") if Array(pattern).empty?
     String(data)
@@ -74,20 +73,18 @@ module Decode
     return *parsed, offset
   end
 
-  ##
-  # Decode.domain_string_array.
   # Parses a domain string array starting at *offset*
   # Data is made up of multiple non-null-terminated strings
   # where the length is specified by a single byte at the start
   #
   # null-byte indicates the end of the data
   #
-  # @param [String] data
-  # @param [Integer] offset
+  # @parameter [String] Binary data to decode
+  # @parameter [Integer] Optional offset to jump to, defaults to 0
   #
-  # @raise [EncodingError] on any length, parsing or string format issues
+  # @raises [EncodingError] on any length, parsing or string format issues
   #
-  # @return [[String], Integer] All strings in order, new offset
+  # @returns [[String], Integer] All strings in order, and new offset
   def self.domain_string_array(data, offset: 0)
     String(data)
     start = offset
@@ -136,15 +133,14 @@ module Decode
     return strings.join('.'), offset
   end
 
-  ##
   # Decodes an IP address in network byte order starting at *offset*
   #
-  # @param [String] data
-  # @param [Integer] offset (optional)
+  # @parameter [String] data
+  # @parameter [Integer] offset (optional)
   #
-  # @raise [EncodingError] when parsing fails, usually due to data being too short
+  # @raises [EncodingError] when parsing fails, usually due to data being too short
   #
-  # @return [IPAddr, Integer] Initialised IP class & new offset
+  # @returns [IPAddr, Integer] Initialised IP class & new offset
   def self.ipv4_addr(data, offset: 0)
     addr = data.unpack("CCCC", offset: offset).join('.')
     return IPAddr.new(addr, family=Socket::AF_INET), offset + 4
@@ -156,12 +152,14 @@ module Decode
 end
 
 module Encode
-  ##
-  # Inverse of Decode::by_pattern, takes a pattern and fields
-  # and outputs a formatted byte-string
+
+  # Inverse of Decode::by_pattern
+  # Takes a pattern and fields and outputs a formatted byte-string
   #
-  # @param [Hash] fields Mapping of field names to data
-  # @param [Hash] pattern Mapping of field names to output encoded type
+  # @parameter [Hash] fields Mapping of field names to data
+  # @parameter [Hash] pattern Mapping of field names to output encoded type
+  #
+  # @returns [String] Binary-encoded output
   def self.by_pattern(fields, pattern)
     raise EncodingError.new("Cannot parse empty pattern, for fields: #{fields}") if Hash(pattern).empty?
     Hash(fields)
@@ -181,22 +179,20 @@ module Encode
     end
 
     return encoded.flatten.join
-  rescue TypeError => e
+  rescue TypeError
     raise EncodingError.new "Encoding failed, missing fields.\nPattern = #{pattern}\nFields = #{fields}"
   end
 
-  ##
   # Inverse of Decode::domain_string_array
-  # takes a list of strings and encodes them into the DNS domain string
+  # Takes a list of strings and encodes them into the DNS domain string
   # format. Each string is headed by an unsigned byte denoting the size.
   # The last string is followed by a null-byte
   #
-  # @param [String] data Strings to encode, no string may exceed 63-bytes
-  #   or contain non-alphanumeric characters.
+  # @parameter data [String] Strings to encode, may not exceed 63-bytes or contain non-alphanumeric characters
   #
-  # @raise [EncodingError] if any String violates length or encoding requirements
+  # @raises [EncodingError] if any String violates length or encoding requirements
   #
-  # @return [String] encoded byte-string
+  # @returns [String] encoded byte-string
   def self.domain_string_array(data)
     data = data.split(".") unless data.is_a? Array
 
@@ -215,20 +211,23 @@ module Encode
     return encoding
   end
 
-  require 'socket'
-
-  ##
-  # Encodes an IP address, as either an Array, String or IPAddr
-  # into a network-ordered ip address
+  # Encodes an IPv4 address, as either an Array, String or IPAddr into a network-ordered IP address
   #
-  # @param [String|Array|IPAddr] data, to encode
+  # @parameter [String|Array|IPAddr] data, to encode
   #
-  # @return [String]
+  # @returns [String] Encoded address
   def self.ipv4_addr(data)
     data = data.join('.') if data.is_a? Array
     addr = IPAddr.new data, Socket::AF_INET
     return addr.hton
   end
+
+
+  # Encodes an IPv6 address, as either an Array, String or IPAddr into a network-ordered IP address
+  #
+  # @parameter [String|Array|IPAddr] data, to encode
+  #
+  # @returns [String] Encoded address
   def self.ipv6_addr(data)
     data = data.map{|x| x.to_s(16)}.join(':') if data.is_a? Array
     addr = IPAddr.new data, Socket::AF_INET6

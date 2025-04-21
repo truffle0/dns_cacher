@@ -377,5 +377,21 @@ module DNS
 
       return self
     end
+
+    # Formats message into a standard query
+    def query!
+      self.qr = false
+      self.ra = self.aa = false
+      self.rd = true
+      
+      self.z = 0
+      self.rcode = self.opcode = 0
+
+      self.authority.clear()
+      self.additional.clear()
+      self.answer.clear()
+
+      return self
+    end
   end
 end
