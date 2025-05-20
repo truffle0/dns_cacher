@@ -1,6 +1,6 @@
 #!/bin/env ruby
 # frozen_string_literal: true
-#require 'dns_cacher'
+
 require_relative '../lib/dns_cacher'
 require 'async'
 
