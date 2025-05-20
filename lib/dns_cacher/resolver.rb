@@ -3,98 +3,110 @@
 require_relative 'dns'
 require 'socket'
 
-module DNSCacher
-  def self.parse_nameservers(source = "/etc/resolv.conf")
-    File.open(source).readlines.each_with_object([]) do |line, arr|
-      md = /^nameserver\s+(?'addr'.*)(\s*#.*)?/.match(line)
-      next if md.nil?  # we're only interested in nameservers
+module Resolver
+  # Parse nameserver Addrinfo from resolv.conf or similarly formatted sources
+  def self.parse_nameservers(source)
+      source.lines.each_with_object([]) do |line, acc|
+        md = /^nameserver\s+(?'addr'.*)(\s*#.*)?/.match(line.chomp)
+        next if md.nil?
 
-      # skip loopback addresses (that's this server)
-      addr = Addrinfo.udp(md[:addr], 53)
-      next if addr.ipv4_loopback? or addr.ipv6_loopback?
+        addr = Addrinfo.ip(md[:addr])
+        next if addr.ipv4_loopback? or addr.ipv6_loopback?
 
-      arr << addr
-    end
+        acc << addr
+      end
   end
   
-  # TODO: overhaul and create resolver class
-  module Resolver
-    # TODO: needs to be configurable at runtime
-    MDNS_DOMAIN = /.*\.local$/
-
-    # How long in seconds (by default) the resolver is willing to wait for a reply
-    PATIENCE = 3
-
-    # How many times servers will be retried before giving up
-    RETRIES = 2
-
-    def self.general_query(query, nameservers)
-      domain = query.question[0].qname
-      if MDNS_DOMAIN.match? domain
-        self.mdns(query)
-      else
-        self.dns(query, nameservers)
-      end
+  # Resolver that uses sends DNS requests over UDP
+  class Basic
+    def initialize(nameservers = [], patience = 3, retries = 2)
+      self.nameservers = nameservers
+      @patience = patience
+      @retries = retries
     end
 
-    # Query 'nameservers' in order until one responds, or raise error
-    #
-    # This is done directly instead of through the Resolv
-    # class to reuse existing encoding, and to allow
-    # later expansion to support more advanced protocols like DNSSEC
-    #
-    # (Personally, I also just wanted to learn about the DNS protocol)
-    def self.dns(query, nameservers, patience: PATIENCE)
-      raise IOError.new "No available nameservers" if nameservers.empty?
+    attr_reader :nameservers
+    def nameservers=(nameservers)
+      @nameservers = nameservers.collect do |addr|
+        Addrinfo.udp(addr.is_a?(Addrinfo) ? addr.ip_address : addr, 53)
+      end.freeze
 
-      # Create a new socket for the outbound connection, and bind to an available port
+      @nameservers
+    end
+
+    def query(msg)
+      raise IOError.new "No available nameservers" if @nameservers.empty?
+      msg = msg.encode if msg.is_a? DNS::Message
+      raise TypeError.new "Invalid query" unless msg.is_a? String
+      
       s = Socket.new :INET, :DGRAM, 0
       s.bind Addrinfo.udp('0.0.0.0', 0)
-
-      # forward query onto each available nameserver in turn
-      # until we get a response
-      packet = query.encode
-      reply, responder = (nameservers * RETRIES).each do |server|
+      
+      packet = msg.encode
+      reply, responder = (nameservers * @retries).each do |server|
         s.sendmsg packet, 0, server
 
         begin
           reply, responder = s.recvmsg_nonblock
           break reply, responder
         rescue IO::WaitReadable
-          read, = IO.select([s], nil, nil, PATIENCE)
-          break nil if read.nil? # indicates timeout rather than available IO
-          retry
+          read, = IO.select([s], nil, nil, @patience)
+          retry unless read.nil?
+          reply = nil
         end
       end
-
-      raise IOError.new "No response" if reply.nil?
       
-      # TODO: proper checks and warnings
-      #unless responder.ip_address == nameservers[0].ip_address
-      #  raise IOError.new "Nameserver '#{nameservers[0].ip_address}' was queried, but '#{responder.ip_address}' responded!"
-      #end
-
       return reply
     end
 
-    def self.mdns(query, patience: PATIENCE)
+    def resolve(domain, record = :A)
+      ques = DNS::Question.new(qname: domain, qtype: record, qclass: :IN)
+      msg = DNS::Message.new(id: Random.rand(), question: ques)
+      msg.query!
+      
+      answer = self.query(msg)
+      return nil if answer.nil?
+      
+      DNS::Message.decode(answer).answer
+    end
+  end
+
+  class Multicast
+    def initialize(patience = 5, retries = 2)
+      @patience = patience
+      @retries = retries
+    end
+    
+    def query(msg)
+      msg = msg.encode if msg.is_a? DNS::Message
+      raise TypeError.new "Invalid query" unless msg.is_a? String
+
       s = Socket.new :INET, :DGRAM, 0
       s.bind Addrinfo.udp("0.0.0.0", 0)
-
-      s.sendmsg query.encode, 0, Addrinfo.udp("224.0.0.251", 5353) # Standard mDNS multicast address
+      
+      # Standard mDNS multicast address
+      s.sendmsg msg.encode, 0, Addrinfo.udp("224.0.0.251", 5353)
 
       begin
         reply, responder = s.recvmsg_nonblock
       rescue IO::WaitReadable
-        read, = IO.select([s], nil, nil, PATIENCE)
+        read, = IO.select([s], nil, nil, @patience)
         retry unless read.nil?
-        raise IOError.new "No one responded to query for #{query.question[0].qname}"
+        reply = nil
       end
-
-     return reply
-    rescue IOError
-      # With mDNS no response means success but server doesn't exist
-      return nil
+      
+      return reply
     end
+
+    def resolve(domain, record = :A)
+      ques = DNS::Question.new(qname: domain, qtype: record, qclass: :IN)
+      msg = DNS::Message.new(id: Random.rand(0..65535), question: ques)
+
+      answer = self.query(msg)
+      return nil if answer.nil?
+
+      answer.answer[0]
+    end
+
   end
 end

@@ -13,29 +13,30 @@ require 'logger'
 module DNSCacher
   
   # Basic caching server, spawns 1 or more {Endpoint}s and {Cache}s queries
+  # Only supports queries for DNS and mDNS
   class BasicServer
     attr_reader :endpoints, :cache, :fiber
-    attr_accessor :nameservers, :logger
+    attr_accessor :logger, :nameservers
     
     # Initialize the server
     #
     # @parameter endpoints [Array<Addrinfo>] Addrinfo struct of endpoints to spawn
     # @param logger [Logger|Syslog::Logger] Optional logger parameter, will spawn one if not provided
-    def initialize(endpoints, logger = nil)
+    def initialize(endpoints, nameservers: [], logger: nil)
       raise ArgumentError.new "No endpoints provided" if endpoints.empty?
 
       @logger = logger.nil? ? Logger.new(nil) : logger
-
       @cache = Cache.new
-      @nameservers = DNSCacher::parse_nameservers
-      @nameservers.each do |addr|
-        @logger.info "Using nameserver #{addr.ip_address}:#{addr.ip_port}"
-      end
 
       @endpoints = endpoints.each_with_object([]) do |addr, arr|
         arr << Endpoint.new(addr)
         @logger.info("Endpoint bound to #{addr.ip_address}:#{addr.ip_port}")
       end
+
+      @dns = Resolver::Basic.new
+      @mdns = Resolver::Multicast.new
+
+      self.nameservers = nameservers
 
       @fiber = nil
     end
@@ -73,6 +74,15 @@ module DNSCacher
       @fiber.stop
     end
     
+    # Set downstream nameservers
+    attr_reader :nameservers
+    def nameservers=(nameservers)
+      @nameservers = nameservers.collect do |addr|
+        addr.is_a?(Addrinfo) ? addr : Addrinfo.ip(addr)
+      end
+      @dns.nameservers = @nameservers
+    end
+    
     private
 
     # Query handler, uses cache is available or forwards to system nameservers
@@ -100,7 +110,13 @@ module DNSCacher
 
         return reply.encode
       else
-        packet = Resolver::general_query(query, @nameservers)
+        # Separate DNS and mDNS queries
+        if /\.local$/.match? question.qname
+          packet = @mdns.query(packet)
+        else 
+          packet = @dns.query(packet)
+        end
+
         @logger.debug{"Query for #{question.qname} (cache miss)"}
         
         # 'nil' return value indicates that query was successful, but domain does not exist
