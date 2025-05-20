@@ -1,0 +1,9 @@
+#!/bin/sh
+# Simple hook to notify the dns_cacher daemon to reload it's DNS config on change
+
+[ $(id -u) -eq 0 ] || exit 1
+
+pidfile="/var/run/dns_cacher.pid"
+[ -f "${pidfile}" ] || exit 0
+
+kill -HUP $(cat ${pidfile})

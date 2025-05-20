@@ -1,0 +1,14 @@
+#!/sbin/openrc-run
+
+pidfile=${DNS_CACHER_PIDFILE:-/run/${RC_SVCNAME}.pid}
+
+command="dns_cacher"
+command_args="-D --pidfile=${pidfile} --user=nobody"
+
+pidfile=${DNS_CACHER_PIDFILE:-/run/${RC_SVCNAME}.pid}
+start_stop_daemon_args="--pidfile=${pidfile}"
+
+depend() {
+	provide dns
+}
+
