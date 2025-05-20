@@ -82,7 +82,7 @@ if ROOT
     Kernel::at_exit do
       spawn("resolvconf -d #{File.basename $0}")
       Process.wait
-      $logger.info "removed openresolv interface"
+      $logger.info "Removed openresolv interface"
     end
   end
 end
@@ -144,7 +144,8 @@ Sync do |task|
   # Re-read system nameservers on SIGHUP
   Signal.trap("HUP") do |signo|
     unless task.reactor.closed?
-      task.reactor.async do
+      task.async do
+        $logger.info "Reloading downstream DNS servers..."
         server.nameservers = if $config[:openresolv]
           Resolver.parse_nameservers(`resolvconf -l`)
         else
