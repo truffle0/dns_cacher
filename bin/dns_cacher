@@ -63,11 +63,12 @@ else
   $logger.level = $config[:debug] ? Logger::DEBUG : Logger::INFO
 end
 
-# If resolvconf (openresolv) is present on the system, then  use it
-if ROOT
-  `which resolvconf`
-  $config[:openresolv] = $?.success?
+# If resolvconf (openresolv) is present, enable it
+`which resolvconf`
+$config[:openresolv] = $?.success?
 
+# if running as root we can add openresolv interfaces
+if ROOT and $config[:openresolv]
   if $config[:openresolv]
     # Create the interface
     r, w = IO.pipe
@@ -119,7 +120,7 @@ $DEFAULT_ENDPOINTS = [
   Addrinfo.udp("::1", ROOT ? 53 : 1053),
 ]
 
-# Allow code from this point runs within an async reactor
+# All code from this point runs within an async reactor
 Sync do |task|
   Signal.trap("INT") do |signo|
     if $logger.is_a? Syslog::Logger
@@ -130,7 +131,7 @@ Sync do |task|
 
     task.reactor.interrupt
   end
-  
+
   # Figure out downstream nameservers
   nameservers = if $config[:openresolv]
     Resolver.parse_nameservers(`resolvconf -l`)
@@ -140,12 +141,12 @@ Sync do |task|
 
   # Setup and run a BasicServer (name is a bit inaccurate, it does quite a bit)
   server = DNSCacher::BasicServer.new($DEFAULT_ENDPOINTS, nameservers: nameservers, logger: $logger)
-  
+
   # Re-read system nameservers on SIGHUP
   Signal.trap("HUP") do |signo|
     unless task.reactor.closed?
       task.async do
-        $logger.info "Reloading downstream DNS servers..."
+        $logger.info "Received SIGHUP, reloading downstream DNS servers..."
         server.nameservers = if $config[:openresolv]
           Resolver.parse_nameservers(`resolvconf -l`)
         else

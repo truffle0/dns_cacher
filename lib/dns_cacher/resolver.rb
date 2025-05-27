@@ -16,7 +16,7 @@ module Resolver
         acc << addr
       end
   end
-  
+
   # Resolver that uses sends DNS requests over UDP
   class Basic
     def initialize(nameservers = [], patience = 3, retries = 2)
@@ -28,23 +28,21 @@ module Resolver
     attr_reader :nameservers
     def nameservers=(nameservers)
       @nameservers = nameservers.collect do |addr|
-        Addrinfo.udp(addr.is_a?(Addrinfo) ? addr.ip_address : addr, 53)
+        addr = addr.ip_address if addr.is_a?(Addrinfo)
+        Addrinfo.udp(addr, 53)
       end.freeze
-
-      @nameservers
     end
 
     def query(msg)
       raise IOError.new "No available nameservers" if @nameservers.empty?
       msg = msg.encode if msg.is_a? DNS::Message
       raise TypeError.new "Invalid query" unless msg.is_a? String
-      
+
       s = Socket.new :INET, :DGRAM, 0
       s.bind Addrinfo.udp('0.0.0.0', 0)
-      
-      packet = msg.encode
+
       reply, responder = (nameservers * @retries).each do |server|
-        s.sendmsg packet, 0, server
+        s.sendmsg msg, 0, server
 
         begin
           reply, responder = s.recvmsg_nonblock
@@ -55,7 +53,7 @@ module Resolver
           reply = nil
         end
       end
-      
+
       return reply
     end
 
@@ -63,10 +61,10 @@ module Resolver
       ques = DNS::Question.new(qname: domain, qtype: record, qclass: :IN)
       msg = DNS::Message.new(id: Random.rand(), question: ques)
       msg.query!
-      
+
       answer = self.query(msg)
       return nil if answer.nil?
-      
+
       DNS::Message.decode(answer).answer
     end
   end
@@ -76,16 +74,16 @@ module Resolver
       @patience = patience
       @retries = retries
     end
-    
+
     def query(msg)
       msg = msg.encode if msg.is_a? DNS::Message
       raise TypeError.new "Invalid query" unless msg.is_a? String
 
       s = Socket.new :INET, :DGRAM, 0
       s.bind Addrinfo.udp("0.0.0.0", 0)
-      
+
       # Standard mDNS multicast address
-      s.sendmsg msg.encode, 0, Addrinfo.udp("224.0.0.251", 5353)
+      s.sendmsg msg, 0, Addrinfo.udp("224.0.0.251", 5353)
 
       begin
         reply, responder = s.recvmsg_nonblock
@@ -94,7 +92,7 @@ module Resolver
         retry unless read.nil?
         reply = nil
       end
-      
+
       return reply
     end
 
