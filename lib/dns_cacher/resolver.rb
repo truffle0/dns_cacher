@@ -19,7 +19,7 @@ module Resolver
 
   # Resolver that uses sends DNS requests over UDP
   class Basic
-    def initialize(nameservers = [], patience = 3, retries = 2)
+    def initialize(nameservers = [], patience = 0.5, retries = 2)
       self.nameservers = nameservers
       @patience = patience
       @retries = retries
@@ -38,23 +38,32 @@ module Resolver
       msg = msg.encode if msg.is_a? DNS::Message
       raise TypeError.new "Invalid query" unless msg.is_a? String
 
-      s = Socket.new :INET, :DGRAM, 0
-      s.bind Addrinfo.udp('0.0.0.0', 0)
+      # IPv6 sockets can accept ipv4 packets too
+      sock = Socket.new :INET6, :DGRAM, 0
+      sock.bind Addrinfo.udp("::", 0)
 
       reply, responder = (nameservers * @retries).each do |server|
-        s.sendmsg msg, 0, server
+        sock.sendmsg msg, 0, server
 
         begin
-          reply, responder = s.recvmsg_nonblock
+          reply, responder = sock.recvmsg_nonblock
           break reply, responder
         rescue IO::WaitReadable
-          read, = IO.select([s], nil, nil, @patience)
+          read, = IO.select([sock], nil, nil, @patience)
           retry unless read.nil?
-          reply = nil
+          break nil
         end
       end
 
       return reply
+    rescue
+      attempts ||= @retries
+      attempts = attempts - 1
+      
+      retry unless attempts <= 0
+      return nil
+    ensure
+      sock.close if defined? sock
     end
 
     def resolve(domain, record = :A)
@@ -79,11 +88,11 @@ module Resolver
       msg = msg.encode if msg.is_a? DNS::Message
       raise TypeError.new "Invalid query" unless msg.is_a? String
 
-      s = Socket.new :INET, :DGRAM, 0
-      s.bind Addrinfo.udp("0.0.0.0", 0)
+      sock = Socket.new :INET, :DGRAM, 0
+      sock.bind Addrinfo.udp("0.0.0.0", 0)
 
       # Standard mDNS multicast address
-      s.sendmsg msg, 0, Addrinfo.udp("224.0.0.251", 5353)
+      sock.sendmsg msg, 0, Addrinfo.udp("224.0.0.251", 5353)
 
       begin
         reply, responder = s.recvmsg_nonblock
@@ -94,6 +103,8 @@ module Resolver
       end
 
       return reply
+    ensure
+      sock.close if defined? sock
     end
 
     def resolve(domain, record = :A)
