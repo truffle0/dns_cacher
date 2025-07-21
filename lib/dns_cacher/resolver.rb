@@ -79,20 +79,33 @@ module Resolver
   end
 
   class Multicast
+    MULTICAST_IPV4 = Addrinfo.udp("224.0.0.251", 5353)
+    MULTICAST_IPV6 = Addrinfo.udp("ff02::fb", 5353)
+
     def initialize(patience = 5, retries = 2)
       @patience = patience
       @retries = retries
     end
 
     def query(msg)
+      qtype = msg.question[0].qtype
       msg = msg.encode if msg.is_a? DNS::Message
       raise TypeError.new "Invalid query" unless msg.is_a? String
-
-      sock = Socket.new :INET, :DGRAM, 0
-      sock.bind Addrinfo.udp("0.0.0.0", 0)
+      
+      sock = if qtype == :A
+        s = Socket.new :INET, :DGRAM, 0
+        s.bind Addrinfo.udp("0.0.0.0", 0)
+        s
+      elsif qtype == :AAAA
+        s = Socket.new :INET6, :DGRAM, 0
+        s.bind Addrinfo.udp("::", 0)
+        s
+      else
+        raise IOError.new("mDNS doesn't support #{qtype} queries")
+      end
 
       # Standard mDNS multicast address
-      sock.sendmsg msg, 0, Addrinfo.udp("224.0.0.251", 5353)
+      sock.sendmsg msg, 0, (qtype == :A ? MULTICAST_IPV4 : MULTICAST_IPV6)
 
       begin
         reply, responder = s.recvmsg_nonblock

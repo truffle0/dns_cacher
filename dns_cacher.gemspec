@@ -1,21 +1,27 @@
 # frozen_string_literal: true
 
-Gem::Specification.new do |s|
-  s.name = "dns_cacher"
-  s.version = "0.3.5"
-  s.license = "GPL-3.0"
+require_relative "lib/dns_cacher/version"
 
-  s.summary = "A minimal and lightweight local DNS/mDNS caching server"
+Gem::Specification.new do |spec|
+  spec.name = "dns_cacher"
+  spec.version = DNSCacher::VERSION
+  spec.authors = ["truffle"]
+  spec.email = ["truffle@b0tt0m.xyz"]
 
-  s.authors = [ "truffle" ]
-  s.email = ["truffle074@gmail.com"]
+  spec.summary = "A minimal and lightweight local DNS/mDNS caching server"
+  spec.homepage = "https://git.b0tt0m.xyz/truffle/dns_cacher"
+  spec.license = "GPL-3.0"
+  spec.required_ruby_version = ">= 3.0.0"
+  
+  spec.metadata["homepage_uri"] = spec.homepage
+  spec.metadata["source_code_uri"] = spec.homepage
+  #spec.metadata["changelog_uri"] =
 
-  s.metadata["source_code_uri"] = "https://github.com/truffle0/dns_cacher"
+  gemspec = File.basename(__FILE__)
+  spec.files = Dir.glob("lib/**/*.rb") + Dir.glob("exe/*")
+  spec.bindir = "exe"
+  spec.executables = spec.files.grep(/^exe\//) { |f| File.basename(f) }
+  spec.require_paths = ["lib"]
 
-  s.files = Dir.glob("lib/**/*.rb")
-  s.bindir = "bin"
-  s.executables = ["dns_cacher"]
-  s.require_paths = ["lib"]
-
-  s.add_dependency("async", "~>2.8")
+  spec.add_dependency "async", "~> 2.8"
 end

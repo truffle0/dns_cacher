@@ -1,0 +1,167 @@
+module DnsCacher
+  VERSION: String
+
+  # See the writing guide of rbs: https://github.com/ruby/rbs#guides
+  # TODO: fix the entire project structure before another dev sees it and cries
+
+  class Cache
+    CacheKey: Struct
+
+    def initialize: () -> void
+
+    def store: (domain: String, rcode: Symbol, records=[DNS::Record]) -> Array[DNS::Record]
+    def fetch: (domain: String, rcode: Symbol) -> Array[DNS::Record]
+  end
+
+  class Endpoint
+    attr_reader addr: Addrinfo
+    attr_reader family: Symbol
+    attr_reader semaphore: Async::Semaphore
+
+    def initialize: (addr: Addrinfo, max_handlers: Integer?) -> void
+    def run: () { (String) -> String } -> void
+  end
+
+  class BasicServer
+    attr_reader endpoints: Array[Endpoint]
+    attr_reader cache: Cache
+    attr_reader fiber: Async::Fiber
+    attr_accessor logger: Logger
+    attr_accessor nameservers: Array[Addrinfo]
+
+    def initialize: (endpoints: Array[Addrinfo], nameservers: Array[Addrinfo]?, logger: Logger?) -> void
+    def run: () -> void
+    def wait: () -> void
+    def stop: () -> void
+  end
+
+  module Resolver
+    def parse_nameservers: (source: File?) -> Array[Addrinfo]
+
+    class Basic
+      attr_accessor nameservers: Array[Addrinfo]
+
+      def initialize: (nameservers: Array[Addrinfo]?, patience: Integer?, retries: Integer?) -> void
+
+      def query: (msg: String|DNS::Message) -> String
+      def resolve: (domain: String, record: Symbol?) -> DNS::Message
+    end
+
+    class Multicast
+      def initialize: (patience: Integer?, retries: Integer?) -> void
+
+      def query: (msg: String|DNS::Message) -> String
+      def resolve: (domain: String, record: Symbol?) -> DNS::Message
+    end
+  end
+end
+
+# TODO: overhaul this module, given it's so complex and a huge
+# bottleneck for performance, it should be implemented in c
+module DNS
+  module Type
+    def type_ids: () -> Hash
+    def struct: (type: Symbol) -> Hash
+    def id: (type: Symbol) -> Integer
+
+    def def_type: (sym: Symbol, id: Integer, struct: Hash) -> Symbol
+    def undef_type: (sym: Symbol) -> void
+
+    # Basic DNS types
+    A: Symbol
+    NS: Symbol
+    MD: Symbol
+    MF: Symbol
+    CNAME: Symbol
+    SOA: Symbol
+    MB: Symbol
+    MG: Symbol
+    MR: Symbol
+    NULL: Symbol
+    WKS: Symbol
+    PTR: Symbol
+    HINFO: Symbol
+    MINFO: Symbol
+    MX: Symbol
+    TXT: Symbol
+    AAAA: Symbol
+
+    def is_standard?: (Symbol) -> bool
+  end
+
+  module QType
+    AXFR: Symbol
+    MAILB: Symbol
+    MAILA: Symbol
+    ALL: Symbol
+  end
+
+  module DClass
+    def class_ids: () -> Hash
+    def id: (sym: Symbol) -> Integer
+
+    def def_class(sym: Symbol, id: Integer) -> void
+    def undef_class(sym: Symbol) -> void
+
+    IN: Symbol
+    CS: Symbol
+    CH: Symbol
+    HS: Symbol
+
+    def is_standard: (sym: Symbol) -> bool
+  end
+
+  module QClass
+    ALL: Symbol
+  end
+
+  class Record < Packet
+  end
+
+  class Question < Packet
+  end
+
+  class Message < Packet
+  end
+end
+
+# Originally intended to be a generic class/module/gem for handing packet logic
+# ended up becoming too complex, though still functional.
+class Packet
+  attr_reader HEADER: Hash[Symbol]?
+  attr_reader CONST: Hash[Symbol]?
+  attr_reader HIDDEN: Array[Symbol]
+  attr_reader FLAGS: Array[Symbol]?
+
+  # any Symbol in HEADER or FLAGS can be accessed as an attribute
+  # except Symbols listed in HIDDEN
+
+  def initialize: (fields: Hash) -> void
+
+  def encode: () -> String
+  def decode: (packet: String) -> Packet
+  def decode_with_offset: (packet: String, offset: Integer?) -> Packet
+
+  def valid?: () -> bool
+  def include?: (field: Symbol) -> bool
+  def []: (field: Symbol) -> untyped
+end
+
+module Decode
+  def by_pattern: (data: String, pattern: Hash, offset: Integer?) -> Hash
+  def by_shape: (data: String, shape: Array, offset: Integer?) -> Array
+
+  def domain_string_array: (data: String, offset: Integer?) -> String
+
+  def ipv4_addr: (data: String, offset: Integer?) -> IPAddr
+  def ipv6_addr: (data: String, offset: Integer?) -> IPAddr
+end
+
+module Encode
+  def by_pattern: (fields: Hash, pattern: Hash) -> String
+
+  def domain_string_array: (data: String) -> String
+
+  def ipv4_addr: (data: String|Array|IPAddr) -> String
+  def ipv6_addr: (data: String|Array|IPAddr) -> String
+end

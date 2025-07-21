@@ -4,6 +4,7 @@ require_relative 'dns_cacher/dns'
 require_relative 'dns_cacher/endpoint'
 require_relative 'dns_cacher/cache'
 require_relative 'dns_cacher/resolver'
+require_relative 'dns_cacher/version'
 
 require 'async'
 require 'async/barrier'
@@ -16,7 +17,7 @@ module DNSCacher
   # Only supports queries for DNS and mDNS
   class BasicServer
     attr_reader :endpoints, :cache, :fiber
-    attr_accessor :logger, :nameservers
+    attr_accessor :logger
     
     # Initialize the server
     #
